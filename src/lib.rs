@@ -282,7 +282,19 @@ impl<'a> Iterator for &'a Getopt {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
+        #[cfg(not(target_os = "linux"))]
         let start_index = unsafe { optind as usize };
+
+        #[cfg(target_os = "linux")]
+        // GNU getopt uses 0 for reset
+        let start_index = unsafe {
+            if optind > 0 {
+                optind as usize
+            } else {
+                1
+            }
+        };
+
         let len = self.args.len();
         if start_index < len {
             (0, Some(len - start_index))
