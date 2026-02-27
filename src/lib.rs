@@ -287,13 +287,7 @@ impl<'a> Iterator for &'a Getopt {
 
         #[cfg(target_os = "linux")]
         // GNU getopt uses 0 for reset
-        let start_index = unsafe {
-            if optind > 0 {
-                optind as usize
-            } else {
-                1
-            }
-        };
+        let start_index = unsafe { if optind > 0 { optind as usize } else { 1 } };
 
         let len = self.args.len();
         if start_index < len {
