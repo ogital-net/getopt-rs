@@ -42,6 +42,29 @@ fn main() {
 }
 ```
 
+### Convenience Constructors
+
+If you simply want to parse your own process's arguments without
+collecting them into a container, the library provides two wrappers:
+
+```rust
+use getopt_rs::Getopt;
+
+fn main() {
+    // the same option string as above
+    let getopt = Getopt::from_args("ab:c", true);
+    for opt in &getopt {
+        // handle options as before
+    }
+
+    // or use `args_os` when non-UTF8 values may appear:
+    let getopt_os = Getopt::from_args_os("ab:c", true);
+    for opt in &getopt_os {
+        // identical behaviour
+    }
+}
+```
+
 ### Option String Format
 
 The option string follows Unix getopt conventions:

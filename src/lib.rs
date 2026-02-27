@@ -1,4 +1,4 @@
-use std::ffi::{c_char, c_int, CStr, CString};
+use std::ffi::{CStr, CString, OsString, c_char, c_int};
 
 #[link(name = "c")]
 unsafe extern "C" {
@@ -8,12 +8,6 @@ unsafe extern "C" {
     static mut opterr: c_int;
     #[cfg(not(target_os = "linux"))]
     static mut optreset: c_int;
-
-    #[cfg_attr(
-        all(target_os = "macos", target_arch = "x86"),
-        link_name = "getopt$UNIX2003"
-    )]
-    fn getopt(argc: c_int, argv: *const *mut c_char, optstr: *const c_char) -> c_int;    
 }
 
 // reset inspired by https://github.com/dnsdb/dnsdbq/commit/efa68c0499c3b5b4a1238318345e5e466a7fd99f
@@ -37,6 +31,37 @@ fn reset_globals(log_err: bool) {
             false => 0,
         };
         optind = 0;
+    }
+}
+
+mod sealed {
+    pub trait Sealed {}
+
+    impl Sealed for &str {}
+    impl Sealed for String {}
+    impl Sealed for std::ffi::OsString {}
+}
+
+pub trait ArgV: sealed::Sealed {
+    fn to_cstring(self) -> CString;
+}
+
+impl ArgV for &str {
+    fn to_cstring(self) -> CString {
+        let vec: Vec<u8> = self.as_bytes().into();
+        unsafe { CString::from_vec_unchecked(vec) }
+    }
+}
+
+impl ArgV for String {
+    fn to_cstring(self) -> CString {
+        unsafe { CString::from_vec_unchecked(self.into_bytes()) }
+    }
+}
+
+impl ArgV for OsString {
+    fn to_cstring(self) -> CString {
+        unsafe { CString::from_vec_unchecked(self.into_encoded_bytes()) }
     }
 }
 
@@ -97,14 +122,13 @@ impl PartialEq<char> for Opt<'_> {
 /// - Use a mutex to synchronize access (see the test module for an example)
 /// - Create and complete iteration of one `Getopt` instance before creating another
 /// - Do not share `Getopt` instances between threads
-pub struct Getopt<'a, A> {
-    args: &'a [A],
-    c_args: Vec<CString>,
-    c_args_ptrs: Vec<*mut c_char>,
+pub struct Getopt {
+    args: Vec<CString>,
+    pointers: Vec<*mut c_char>,
     optstring: CString,
 }
 
-impl<'a, A> Getopt<'a, A> {
+impl Getopt {
     /// Creates a new Getopt parser with the specified arguments and option string.
     ///
     /// # Arguments
@@ -119,30 +143,72 @@ impl<'a, A> Getopt<'a, A> {
     /// ```
     /// use getopt_rs::Getopt;
     /// let args = vec!["program", "-f", "file.txt"];
-    /// let opts = Getopt::new(&args, "f:", true);
+    /// let opts = Getopt::new(args, "f:", true);
     /// ```
-    pub fn new<O>(args: &'a [A], optstring: O, log_err: bool) -> Self
+    pub fn new<A, V, O>(args: A, optstring: O, log_err: bool) -> Self
     where
-        A: Into<Vec<u8>> + Clone,
+        A: IntoIterator<Item = V>,
+        V: ArgV,
         O: Into<Vec<u8>>,
     {
         reset_globals(log_err);
+        let i = args.into_iter();
+        let mut args: Vec<CString> = Vec::new();
+        let mut pointers: Vec<*mut c_char> = Vec::new();
 
-        let c_args: Vec<CString> = args
-            .iter()
-            .map(|s| CString::new((*s).clone()).unwrap())
-            .collect();
-        let c_args_ptrs: Vec<*mut c_char> = c_args
-            .iter()
-            .map(|v| v.as_ptr() as *mut c_char)
-            .collect();
-        let optstring = CString::new(optstring).unwrap();
+        if let Some(size) = i.size_hint().1 {
+            args.reserve_exact(size);
+            pointers.reserve_exact(size);
+        };
+        for v in i {
+            let cs = v.to_cstring();
+            let ptr = cs.as_ptr() as *const _ as *mut c_char;
+            args.push(cs);
+            pointers.push(ptr);
+        }
+        let optstring = unsafe { CString::from_vec_unchecked(optstring.into()) };
+
         Self {
             args,
-            c_args,
-            c_args_ptrs,
+            pointers,
             optstring,
         }
+    }
+
+    /// Create a `Getopt` instance using the current process's
+    /// [`std::env::args_os()`] iterator as the argument source.
+    ///
+    /// This is a thin wrapper around [`Getopt::new`], passing through the
+    /// command-line arguments supplied by the operating system. It is useful
+    /// for applications that want to parse their own arguments without first
+    /// collecting them into a `Vec`.
+    ///
+    /// # Arguments
+    ///
+    /// * `optstring` - option specification string, same as for [`Getopt::new`]
+    /// * `log_err` - controls whether missing/invalid options are printed to
+    ///   stderr.
+    ///
+    /// [`std::env::args_os()`]: https://doc.rust-lang.org/std/env/fn.args_os.html
+    pub fn from_args_os<O>(optstring: O, log_err: bool) -> Self
+    where
+        O: Into<Vec<u8>>,
+    {
+        Self::new(std::env::args_os(), optstring, log_err)
+    }
+
+    /// Same as [`from_args_os`], but uses [`std::env::args()`] which returns
+    /// `String` values. This is convenient when the arguments are known to be
+    /// valid UTF‑8.
+    ///
+    /// The parameters have the same meaning as for [`Getopt::new`].
+    ///
+    /// [`std::env::args()`]: https://doc.rust-lang.org/std/env/fn.args.html
+    pub fn from_args<O>(optstring: O, log_err: bool) -> Self
+    where
+        O: Into<Vec<u8>>,
+    {
+        Self::new(std::env::args(), optstring, log_err)
     }
 
     /// Returns a slice containing the remaining unparsed arguments.
@@ -154,23 +220,26 @@ impl<'a, A> Getopt<'a, A> {
     /// ```
     /// use getopt_rs::Getopt;
     /// let args = vec!["program", "-f", "file.txt", "arg1", "arg2"];
-    /// let opts = Getopt::new(&args, "f:", true);
+    /// let opts = Getopt::new(args, "f:", true);
     /// let _parsed: Vec<_> = opts.into_iter().collect();
     /// assert_eq!(opts.remaining(), &["arg1", "arg2"]);
     /// ```
-    pub fn remaining(&self) -> &[A] {
+    pub fn remaining(&self) -> Vec<&str> {
         unsafe { &self.args[(optind as usize)..] }
+            .iter()
+            .map(|v| core::str::from_utf8(v.as_bytes()).unwrap())
+            .collect()
     }
 }
 
-impl<'a, A> Iterator for &'a Getopt<'_, A> {
+impl<'a> Iterator for &'a Getopt {
     type Item = Opt<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let res = unsafe {
-            getopt(
-                self.c_args.len() as c_int,
-                self.c_args_ptrs.as_ptr(),
+            libc::getopt(
+                self.pointers.len() as c_int,
+                self.pointers.as_ptr(),
                 self.optstring.as_ptr(),
             )
         };
@@ -198,7 +267,10 @@ impl<'a, A> Iterator for &'a Getopt<'_, A> {
                 None
             } else {
                 let cstr = CStr::from_ptr(optarg);
-                Some(cstr.to_str().unwrap())
+                // UTF-8 may not be guaranteed; return `None` on failure rather than
+                // panic.  This mirrors the behaviour of `String::from_utf8_lossy`
+                // but avoids allocation.
+                cstr.to_str().ok()
             }
         };
 
@@ -207,6 +279,16 @@ impl<'a, A> Iterator for &'a Getopt<'_, A> {
             erropt,
             arg,
         })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let start_index = unsafe { optind as usize };
+        let len = self.args.len();
+        if start_index < len {
+            (0, Some(len - start_index))
+        } else {
+            (0, Some(0))
+        }
     }
 }
 
@@ -223,7 +305,7 @@ mod tests {
         let _lock = GLOBAL_LOCK.lock().unwrap();
 
         let args = vec!["cmd", "-f", "path"];
-        let getopt = Getopt::new(&args, "f:", false);
+        let getopt = Getopt::new(args, "f:", false);
         let parsed: Vec<Opt> = getopt.into_iter().collect();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].val(), 'f');
@@ -232,11 +314,31 @@ mod tests {
     }
 
     #[test]
+    fn test_size_hint() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        let args = vec!["cmd", "-a", "-b"];
+        let getopt = Getopt::new(args, "ab", false);
+        let mut iter = &getopt;
+
+        // initial upper bound includes both options (`len - 1`)
+        assert_eq!(iter.size_hint(), (0, Some(2)));
+
+        // consume one option and check hint again
+        iter.next();
+        assert_eq!(iter.size_hint(), (0, Some(1)));
+
+        // consume second option -> no remaining items
+        iter.next();
+        assert_eq!(iter.size_hint(), (0, Some(0)));
+    }
+
+    #[test]
     fn test_missing_arg() {
         let _lock = GLOBAL_LOCK.lock().unwrap();
 
         let args = vec!["cmd", "-f"];
-        let getopt = Getopt::new(&args, "f:", false);
+        let getopt = Getopt::new(args, "f:", false);
         let parsed: Vec<Opt> = getopt.into_iter().collect();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].val(), '?');
@@ -248,7 +350,7 @@ mod tests {
         let _lock = GLOBAL_LOCK.lock().unwrap();
 
         let args = vec!["cmd", "-f"];
-        let getopt = Getopt::new(&args, ":f:", false);
+        let getopt = Getopt::new(args, ":f:", false);
         let parsed: Vec<Opt> = getopt.into_iter().collect();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].val(), ':');
@@ -260,7 +362,7 @@ mod tests {
         let _lock = GLOBAL_LOCK.lock().unwrap();
 
         let args = vec!["cmd", "-x"];
-        let getopt = Getopt::new(&args, "f:", false);
+        let getopt = Getopt::new(args, "f:", false);
         let parsed: Vec<Opt> = getopt.into_iter().collect();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].val(), '?');
@@ -272,7 +374,7 @@ mod tests {
         let _lock = GLOBAL_LOCK.lock().unwrap();
 
         let args = vec!["cmd", "-a", "-b", "value", "-c"];
-        let getopt = Getopt::new(&args, "ab:c", false);
+        let getopt = Getopt::new(args, "ab:c", false);
         let parsed: Vec<Opt> = getopt.into_iter().collect();
         assert_eq!(parsed.len(), 3);
 
@@ -291,7 +393,7 @@ mod tests {
         let _lock = GLOBAL_LOCK.lock().unwrap();
 
         let args = vec!["cmd", "-a", "file1", "file2"];
-        let getopt = Getopt::new(&args, "a", false);
+        let getopt = Getopt::new(args, "a", false);
         let _parsed: Vec<Opt> = getopt.into_iter().collect();
         assert_eq!(getopt.remaining(), &["file1", "file2"]);
     }
@@ -301,7 +403,7 @@ mod tests {
         let _lock = GLOBAL_LOCK.lock().unwrap();
 
         let args = vec!["cmd", "-f", "path"];
-        let getopt = Getopt::new(&args, "f:", false);
+        let getopt = Getopt::new(args, "f:", false);
         let parsed: Vec<Opt> = getopt.into_iter().collect();
 
         // Test direct equality with char
