@@ -47,6 +47,7 @@ pub trait ArgV: sealed::Sealed {
 }
 
 impl ArgV for &str {
+    // SAFETY: an interior null byte is simply viewed as a shorter string by getopt
     fn to_cstring(self) -> CString {
         let vec: Vec<u8> = self.as_bytes().into();
         unsafe { CString::from_vec_unchecked(vec) }
@@ -54,6 +55,7 @@ impl ArgV for &str {
 }
 
 impl ArgV for String {
+    // SAFETY: an interior null byte is simply viewed as a shorter string by getopt
     fn to_cstring(self) -> CString {
         unsafe { CString::from_vec_unchecked(self.into_bytes()) }
     }
@@ -61,7 +63,12 @@ impl ArgV for String {
 
 impl ArgV for OsString {
     fn to_cstring(self) -> CString {
-        unsafe { CString::from_vec_unchecked(self.into_encoded_bytes()) }
+        let s = match self.into_string() {
+            Ok(s) => s,
+            Err(o) => o.to_string_lossy().into_owned(),
+        };
+        // SAFETY: an interior null byte is simply viewed as a shorter string by getopt
+        unsafe { CString::from_vec_unchecked(s.into_bytes()) }
     }
 }
 
@@ -225,10 +232,79 @@ impl Getopt {
     /// assert_eq!(opts.remaining(), &["arg1", "arg2"]);
     /// ```
     pub fn remaining(&self) -> Vec<&str> {
-        unsafe { &self.args[(optind as usize)..] }
+        if self.args.is_empty() {
+            return Vec::new();
+        }
+
+        self.args[self.next_index()..]
             .iter()
-            .map(|v| core::str::from_utf8(v.as_bytes()).unwrap())
+            .map(|v| unsafe { std::str::from_utf8_unchecked(v.as_bytes()) })
             .collect()
+    }
+
+    /// Returns the full file name or path of the program being run.
+    ///
+    /// This is the first argument supplied to the parser (typically `argv[0]`),
+    /// which is usually the program name or path as invoked by the shell.
+    ///
+    /// # Returns
+    ///
+    /// - The first argument as a string slice if arguments were provided
+    /// - An empty string if no arguments were provided
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use getopt_rs::Getopt;
+    /// let args = vec!["/usr/bin/myapp", "-f", "file.txt"];
+    /// let getopt = Getopt::new(args, "f:", false);
+    /// assert_eq!(getopt.file_name(), "/usr/bin/myapp");
+    /// ```
+    pub fn file_name(&self) -> &str {
+        match self.args.is_empty() {
+            true => "",
+            false => unsafe { std::str::from_utf8_unchecked(self.args[0].as_bytes()) },
+        }
+    }
+
+    /// Returns the program name (basename) without the directory path.
+    ///
+    /// This extracts the base name of the program by finding the last '/' character
+    /// in the file path and returning everything after it. If no '/' is found,
+    /// the entire file name is returned.
+    ///
+    /// # Returns
+    ///
+    /// - The program name (basename) without directory components
+    /// - An empty string if no arguments were provided
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use getopt_rs::Getopt;
+    /// let args = vec!["/usr/bin/myapp", "-f", "file.txt"];
+    /// let getopt = Getopt::new(args, "f:", false);
+    /// assert_eq!(getopt.prog_name(), "myapp");
+    /// ```
+    pub fn prog_name(&self) -> &str {
+        const PATH_SEP: char = '/';
+
+        let s = self.file_name();
+        if let Some(idx) = s.rfind(PATH_SEP) {
+            return &s[(idx + 1)..];
+        }
+        s
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn next_index(&self) -> usize {
+        unsafe { optind as usize }.min(self.args.len())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn next_index(&self) -> usize {
+        // GNU and musl getopt uses 0 for reset
+        unsafe { if optind > 0 { optind as usize } else { 1 } }.min(self.args.len())
     }
 }
 
@@ -266,11 +342,10 @@ impl<'a> Iterator for &'a Getopt {
             if optarg.is_null() {
                 None
             } else {
-                let cstr = CStr::from_ptr(optarg);
-                // UTF-8 may not be guaranteed; return `None` on failure rather than
-                // panic.  This mirrors the behaviour of `String::from_utf8_lossy`
-                // but avoids allocation.
-                cstr.to_str().ok()
+                // SAFETY: the strings provided were all verified to be UTF-8
+                Some(std::str::from_utf8_unchecked(
+                    CStr::from_ptr(optarg).to_bytes(),
+                ))
             }
         };
 
@@ -282,19 +357,10 @@ impl<'a> Iterator for &'a Getopt {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        #[cfg(not(target_os = "linux"))]
-        let start_index = unsafe { optind as usize };
-
-        #[cfg(target_os = "linux")]
-        // GNU getopt uses 0 for reset
-        let start_index = unsafe { if optind > 0 { optind as usize } else { 1 } };
-
-        let len = self.args.len();
-        if start_index < len {
-            (0, Some(len - start_index))
-        } else {
-            (0, Some(0))
+        if self.args.is_empty() {
+            return (0, Some(0));
         }
+        (0, Some(self.args.len() - self.next_index()))
     }
 }
 
@@ -395,13 +461,38 @@ mod tests {
     }
 
     #[test]
+    fn test_empty_args() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        let getopt = Getopt::new(Vec::<String>::new(), "a", false);
+
+        let _parsed: Vec<Opt> = getopt.into_iter().collect();
+        assert!(getopt.remaining().is_empty());
+    }
+
+    #[test]
     fn test_remaining_args() {
         let _lock = GLOBAL_LOCK.lock().unwrap();
 
         let args = vec!["cmd", "-a", "file1", "file2"];
         let getopt = Getopt::new(args, "a", false);
+        assert_eq!(getopt.remaining(), &["-a", "file1", "file2"]);
         let _parsed: Vec<Opt> = getopt.into_iter().collect();
         assert_eq!(getopt.remaining(), &["file1", "file2"]);
+    }
+
+    #[test]
+    fn test_verifies_optind_bounds() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        let args = vec!["cmd", "-a", "-b", "-c"];
+        let getopt = Getopt::new(args, ":a:b:c:d:", false);
+        let mut getopt = getopt.into_iter();
+        for _i in 1..10 {
+            getopt.next();
+        }
+        assert_eq!(getopt.size_hint().1, Some(0));
+        assert!(getopt.remaining().is_empty());
     }
 
     #[test]
@@ -419,5 +510,121 @@ mod tests {
         // Test with references
         assert_eq!(&parsed[0], &'f');
         assert_ne!(&parsed[0], &'x');
+    }
+
+    #[test]
+    fn test_non_utf8_option_arg() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        // Construct an argument list where the option's argument contains
+        // invalid UTF-8.
+        let mut args: Vec<OsString> = Vec::with_capacity(4);
+        args.push(OsString::from("cmd"));
+        args.push(OsString::from("-f"));
+        let mut bad_bytes = vec![0xff, 0xfe]; // not valid UTF-8
+        bad_bytes.extend_from_slice(b"ABCD");
+        args.push(unsafe { OsString::from_encoded_bytes_unchecked(bad_bytes) });
+        let mut bad_bytes = vec![0xff, 0xfe];
+        bad_bytes.extend_from_slice(b"EFGH");
+        args.push(unsafe { OsString::from_encoded_bytes_unchecked(bad_bytes) });
+
+        let getopt = Getopt::new(args, "f:", false);
+        let parsed: Vec<Opt> = getopt.into_iter().collect();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].val(), 'f');
+        assert_eq!(parsed[0].arg(), Some("��ABCD"));
+        assert_eq!(getopt.remaining(), vec!["��EFGH"]);
+    }
+
+    #[test]
+    fn test_handles_interior_nulls_gracefully() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        // Construct an argument list where the option's argument contains
+        // invalid UTF-8.
+        let mut args: Vec<String> = Vec::with_capacity(4);
+        args.push("cmd".into());
+        args.push("-f".into());
+        let mut bad_string: String = "ABCD".into();
+        bad_string.push(0 as char);
+        bad_string.push_str("EFGH");
+        args.push(bad_string);
+
+        let getopt = Getopt::new(args, "f:", false);
+        let parsed: Vec<Opt> = getopt.into_iter().collect();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].val(), 'f');
+        assert_eq!(parsed[0].arg(), Some("ABCD"));
+    }
+
+    #[test]
+    fn test_file_name_with_path() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        let args = vec!["/usr/bin/myapp", "-f", "file.txt"];
+        let getopt = Getopt::new(args, "f:", false);
+        assert_eq!(getopt.file_name(), "/usr/bin/myapp");
+    }
+
+    #[test]
+    fn test_file_name_without_path() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        let args = vec!["myapp", "-f", "file.txt"];
+        let getopt = Getopt::new(args, "f:", false);
+        assert_eq!(getopt.file_name(), "myapp");
+    }
+
+    #[test]
+    fn test_file_name_empty_args() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        let getopt = Getopt::new(Vec::<String>::new(), "f:", false);
+        assert_eq!(getopt.file_name(), "");
+    }
+
+    #[test]
+    fn test_prog_name_with_full_path() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        let args = vec!["/usr/bin/myapp", "-f", "file.txt"];
+        let getopt = Getopt::new(args, "f:", false);
+        assert_eq!(getopt.prog_name(), "myapp");
+    }
+
+    #[test]
+    fn test_prog_name_without_path() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        let args = vec!["myapp", "-f", "file.txt"];
+        let getopt = Getopt::new(args, "f:", false);
+        assert_eq!(getopt.prog_name(), "myapp");
+    }
+
+    #[test]
+    fn test_prog_name_deep_nested_path() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        let args = vec!["/very/long/nested/path/to/myapp", "-f", "file.txt"];
+        let getopt = Getopt::new(args, "f:", false);
+        assert_eq!(getopt.prog_name(), "myapp");
+    }
+
+    #[test]
+    fn test_prog_name_trailing_slash() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        // Edge case: if argv[0] ends with a slash, prog_name returns empty string
+        let args = vec!["/usr/bin/", "-f"];
+        let getopt = Getopt::new(args, "f:", false);
+        assert_eq!(getopt.prog_name(), "");
+    }
+
+    #[test]
+    fn test_prog_name_empty_args() {
+        let _lock = GLOBAL_LOCK.lock().unwrap();
+
+        let getopt = Getopt::new(Vec::<String>::new(), "f:", false);
+        assert_eq!(getopt.prog_name(), "");
     }
 }

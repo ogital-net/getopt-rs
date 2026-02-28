@@ -23,8 +23,7 @@ use getopt_rs::Getopt;
 fn main() {
     // assuming
     // program -a -b value -c file1 file2
-    let args: Vec<String> = std::env::args().collect();
-    let getopt = Getopt::new(&args, "ab:c", true);
+    let getopt = Getopt::new(std::env::args_os(), "ab:c", true);
 
     // Iterate over the options
     for opt in &getopt {
@@ -96,11 +95,83 @@ if let Some(opt) = getopt.into_iter().next() {
 }
 ```
 
+## Examples
+
+### Parse input/output file options
+
+```rust
+use getopt_rs::Getopt;
+
+let args = vec!["program", "-i", "input.txt", "-o", "output.txt", "-v"];
+let getopt = Getopt::new(args, "i:o:v", true);
+
+let mut input_file = None;
+let mut output_file = None;
+let mut verbose = false;
+
+for opt in &getopt {
+    match opt.val() {
+        'i' => input_file = opt.arg(),
+        'o' => output_file = opt.arg(),
+        'v' => verbose = true,
+        '?' => eprintln!("Unknown option: -{}", opt.erropt().unwrap()),
+        _ => {}
+    }
+}
+
+assert_eq!(input_file, Some("input.txt"));
+assert_eq!(output_file, Some("output.txt"));
+assert!(verbose);
+```
+
+### Access program name for usage messages
+
+```rust
+use getopt_rs::Getopt;
+
+let args = vec!["/usr/bin/myapp", "-h"];
+let getopt = Getopt::new(args, "h", true);
+
+let program = getopt.prog_name();  // "myapp"
+let full_path = getopt.file_name(); // "/usr/bin/myapp"
+
+for opt in &getopt {
+    if opt.val() == 'h' {
+        println!("Usage: {} [OPTIONS] FILES...", program);
+    }
+}
+```
+
+### Handle multiple flags and positional arguments
+
+```rust
+use getopt_rs::Getopt;
+
+let args = vec!["cmd", "-abc", "file1.txt", "file2.txt"];
+let getopt = Getopt::new(args, "abc", true);
+
+let mut flags = Vec::new();
+for opt in &getopt {
+    match opt.val() {
+        'a' | 'b' | 'c' => flags.push(opt.val()),
+        _ => {}
+    }
+}
+
+let remaining = getopt.remaining();
+assert_eq!(flags, vec!['a', 'b', 'c']);
+assert_eq!(remaining, vec!["file1.txt", "file2.txt"]);
+```
+
+### Handle invalid UTF-8 arguments
+
+When command-line arguments may contain non-UTF-8 sequences, use `OsString` and `from_args_os`.  Invalid UTF-8 are replaced.
+
 ## License
 
 BSD-2-Clause
 
-Copyright 2025 Latigo LLC
+Copyright 2026 Latigo LLC
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 
