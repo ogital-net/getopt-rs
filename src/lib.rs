@@ -707,7 +707,8 @@ mod tests {
             assert_eq!(convert(os), "valid");
 
             // Invalid UTF-8 sequence
-            let os = unsafe { OsString::from_encoded_bytes_unchecked(b"hello\xFF\xFEworld".to_vec()) };
+            let os =
+                unsafe { OsString::from_encoded_bytes_unchecked(b"hello\xFF\xFEworld".to_vec()) };
             assert_eq!(convert(os), "hello��world");
 
             // Test that OsString with valid UTF-8 works as expected
