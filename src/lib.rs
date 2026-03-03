@@ -707,9 +707,13 @@ mod tests {
             assert_eq!(convert(os), "valid");
 
             // Invalid UTF-8 sequence
-            let os =
-                unsafe { OsString::from_encoded_bytes_unchecked(b"hello\xFF\xFEworld".to_vec()) };
-            assert_eq!(convert(os), "hello��world");
+            #[cfg(unix)]
+            {
+                let os = unsafe {
+                    OsString::from_encoded_bytes_unchecked(b"hello\xFF\xFEworld".to_vec())
+                };
+                assert_eq!(convert(os), "hello��world");
+            }
 
             // Test that OsString with valid UTF-8 works as expected
             let os = OsString::from("test123");
@@ -1779,7 +1783,11 @@ mod tests {
     #[test]
     fn prog_name_with_absolute_path() {
         // Test with absolute path - should extract basename
+        #[cfg(unix)]
         let args = &["/usr/bin/myapp", "-a"];
+        #[cfg(windows)]
+        let args = &["C:\\Program Files\\myapp", "-a"];
+
         let getopt = Getopt::new(args, "a", true);
         assert_eq!(getopt.prog_name(), "myapp");
     }
@@ -1787,7 +1795,11 @@ mod tests {
     #[test]
     fn prog_name_with_relative_path() {
         // Test with relative path - should extract basename
+        #[cfg(unix)]
         let args = &["./bin/myapp", "-a"];
+        #[cfg(windows)]
+        let args = &[".\\bin\\myapp", "-a"];
+
         let getopt = Getopt::new(args, "a", true);
         assert_eq!(getopt.prog_name(), "myapp");
     }
