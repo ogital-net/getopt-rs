@@ -6,15 +6,15 @@ This library provides a `getopt` implementation that closely follows POSIX conve
 
 ## Features
 
-- ✅ **POSIX-compliant** option parsing
-- ✅ **GNU long options** with `--option` syntax
-- ✅ **Short option aggregation** (`-abc` equivalent to `-a -b -c`)
-- ✅ **Flexible argument handling** (optional, required, attached, or separate)
-- ✅ **Iterator-based API** for ergonomic usage
-- ✅ **`no_std` support** with optional `std` feature
-- ✅ **Zero dependencies** (in `no_std` mode)
-- ✅ **Type-safe option parsing** with compile-time checks
-- ✅ **Works with multiple string types** (`&str`, `String`, `OsString`)
+- **POSIX-compliant** option parsing
+- **GNU long options** with `--option` syntax
+- **Short option aggregation** (`-abc` equivalent to `-a -b -c`)
+- **Flexible argument handling** (optional, required, attached, or separate)
+- **Iterator-based API** for ergonomic usage
+- **`no_std` support** with optional `std` feature
+- **Zero dependencies** (in `no_std` mode)
+- **Type-safe option parsing** with compile-time checks
+- **Works with multiple string types** (`&str`, `String`, `OsString`)
 
 ## Installation
 
