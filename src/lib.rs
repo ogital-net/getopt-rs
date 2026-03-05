@@ -369,7 +369,7 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     /// # Examples
     /// ```
     /// use getopt_rs::Getopt;
-    /// 
+    ///
     /// let args = &["prog", "-a", "file1", "file2"];
     /// let mut getopt = Getopt::new(args, "a");
     /// getopt.next(); // Parse -a
