@@ -13,7 +13,7 @@
 //! use getopt_rs::Getopt;
 //!
 //! let args = vec!["myapp", "-a", "-b", "value", "file.txt"];
-//! let mut getopt = Getopt::new(args.iter().copied(), "ab:", true);
+//! let mut getopt = Getopt::new(args.iter().copied(), "ab:");
 //!
 //! while let Some(opt) = getopt.next() {
 //!     match opt.val() {
@@ -88,7 +88,8 @@
 //!     let args = unsafe { ArgvIter::new(argc, argv) };
 //!     
 //!     // Parse options using getopt
-//!     let mut getopt = Getopt::new(args, "hvf:", false);
+//!     let mut getopt = Getopt::new(args, "hvf:");
+//!     getopt.set_opterr(false); // Suppress error messages in no_std environment
 //!     
 //!     let mut verbose = false;
 //!     let mut filename = None;
@@ -307,20 +308,18 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     ///   - Leading `:` suppresses error messages and changes error return values
     ///   - Leading `+` stops at first non-option (POSIX mode)
     ///   - Parenthesized names define long options (e.g., `"h(help)"` allows `--help`)
-    /// * `opterr` - Whether to print error messages to stderr (requires `std` feature)
+    ///
+    /// Error messages are printed to stderr by default (when the `std` feature is enabled),
+    /// in accordance with POSIX specifications. Use [`set_opterr`](Self::set_opterr) to disable them.
     ///
     /// # Examples
-    /// ```ignore
-    /// use getopt::Getopt;
+    /// ```
+    /// use getopt_rs::Getopt;
     ///
     /// let args = vec!["myapp", "-a", "-b", "value"];
-    /// let mut getopt = Getopt::new(args.iter().copied(), "ab:", true);
+    /// let mut getopt = Getopt::new(args, "ab:");
     /// ```
-    pub fn new<A: IntoIterator<Item = V, IntoIter = I>>(
-        args: A,
-        optstring: &'a str,
-        opterr: bool,
-    ) -> Self {
+    pub fn new<A: IntoIterator<Item = V, IntoIter = I>>(args: A, optstring: &'a str) -> Self {
         let mut iter = args.into_iter();
         // program name (first argument)
         let prog_name = iter.next().map(ArgV::into_string).unwrap_or_default();
@@ -330,9 +329,30 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
             current_arg: None,
             prog_name,
             sp: 1,
-            opterr,
+            opterr: true,
             optstring: optstring.as_bytes(),
         }
+    }
+
+    /// Set whether error messages should be printed to stderr.
+    ///
+    /// By default, error messages are printed to stderr (when the `std` feature is enabled),
+    /// in accordance with POSIX specifications. Call this method with `false` to suppress
+    /// error output.
+    ///
+    /// # Arguments
+    /// * `opterr` - Whether to print error messages to stderr (requires `std` feature)
+    ///
+    /// # Examples
+    /// ```
+    /// use getopt_rs::Getopt;
+    ///
+    /// let args = vec!["myapp", "-x"];
+    /// let mut getopt = Getopt::new(args, "ab:");
+    /// getopt.set_opterr(false); // Suppress error messages
+    /// ```
+    pub fn set_opterr(&mut self, opterr: bool) {
+        self.opterr = opterr;
     }
 
     /// Advance to the next argument from the iterator
@@ -347,9 +367,11 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     /// to retrieve positional arguments or arguments after `--`.
     ///
     /// # Examples
-    /// ```ignore
+    /// ```
+    /// use getopt_rs::Getopt;
+    /// 
     /// let args = &["prog", "-a", "file1", "file2"];
-    /// let mut getopt = Getopt::new(args.iter().copied(), "a", true);
+    /// let mut getopt = Getopt::new(args, "a");
     /// getopt.next(); // Parse -a
     /// for arg in getopt.remaining() {
     ///     println!("Positional arg: {}", arg);
@@ -367,13 +389,13 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```
     /// let args = vec!["myapp".to_string(), "-a".to_string()];
-    /// let getopt = getopt::Getopt::new(args.into_iter(), "a", true);
+    /// let getopt = getopt_rs::Getopt::new(args.into_iter(), "a");
     /// assert_eq!(getopt.prog_name(), "myapp");
     ///
     /// let args = vec!["/usr/bin/myapp".to_string(), "-a".to_string()];
-    /// let getopt = getopt::Getopt::new(args.into_iter(), "a", true);
+    /// let getopt = getopt_rs::Getopt::new(args.into_iter(), "a");
     /// assert_eq!(getopt.prog_name(), "myapp");
     /// ```
     pub fn prog_name(&self) -> &str {
@@ -724,7 +746,7 @@ mod tests {
     #[test]
     fn test_single_short_option() {
         let args = &["prog", "-a"];
-        let mut getopt = Getopt::new(args, "ab", true);
+        let mut getopt = Getopt::new(args, "ab");
         let result = getopt.next();
 
         assert_eq!(
@@ -740,7 +762,7 @@ mod tests {
     #[test]
     fn test_multiple_short_options() {
         let args = &["prog", "-a", "-b"];
-        let mut getopt = Getopt::new(args, "ab", true);
+        let mut getopt = Getopt::new(args, "ab");
 
         let r1 = getopt.next();
         assert_eq!(
@@ -766,7 +788,7 @@ mod tests {
     #[test]
     fn test_aggregated_short_options() {
         let args = &["prog", "-abc"];
-        let mut getopt = Getopt::new(args, "abc", true);
+        let mut getopt = Getopt::new(args, "abc");
 
         let r1 = getopt.next();
         assert_eq!(
@@ -802,7 +824,7 @@ mod tests {
     #[test]
     fn test_short_option_with_attached_argument() {
         let args = &["prog", "-avalue"];
-        let mut getopt = Getopt::new(args, "a:", true);
+        let mut getopt = Getopt::new(args, "a:");
 
         let result = getopt.next();
         assert_eq!(
@@ -818,7 +840,7 @@ mod tests {
     #[test]
     fn test_short_option_with_separate_argument() {
         let args = &["prog", "-a", "value"];
-        let mut getopt = Getopt::new(args, "a:", true);
+        let mut getopt = Getopt::new(args, "a:");
 
         let result = getopt.next();
         assert_eq!(
@@ -834,7 +856,7 @@ mod tests {
     #[test]
     fn test_long_option_simple() {
         let args = &["prog", "--help"];
-        let mut getopt = Getopt::new(args, "h(help)", true);
+        let mut getopt = Getopt::new(args, "h(help)");
 
         let result = getopt.next();
         assert_eq!(
@@ -850,7 +872,7 @@ mod tests {
     #[test]
     fn test_long_option_with_argument() {
         let args = &["prog", "--output=file.txt"];
-        let mut getopt = Getopt::new(args, "o:(output)", true);
+        let mut getopt = Getopt::new(args, "o:(output)");
 
         let result = getopt.next();
         assert_eq!(
@@ -866,7 +888,7 @@ mod tests {
     #[test]
     fn test_multiple_option_with_argument() {
         let args = &["prog", "--output=file.txt"];
-        let mut getopt = Getopt::new(args, "o:(outfile)(output)", true);
+        let mut getopt = Getopt::new(args, "o:(outfile)(output)");
 
         let result = getopt.next();
         assert_eq!(
@@ -881,7 +903,7 @@ mod tests {
 
         // with outfile instead
         let args = &["prog", "--outfile=file.txt"];
-        let mut getopt = Getopt::new(args, "o:(outfile)(output)", true);
+        let mut getopt = Getopt::new(args, "o:(outfile)(output)");
 
         let result = getopt.next();
         assert_eq!(
@@ -898,7 +920,7 @@ mod tests {
     #[test]
     fn test_long_option_without_argument() {
         let args = &["prog", "--verbose=file.txt"];
-        let mut getopt = Getopt::new(args, "v(verbose)", true);
+        let mut getopt = Getopt::new(args, "v(verbose)");
 
         let result = getopt.next();
         assert_eq!(
@@ -914,7 +936,7 @@ mod tests {
     #[test]
     fn test_end_of_options() {
         let args = &["prog", "-a", "file.txt"];
-        let mut getopt = Getopt::new(args, "a", true);
+        let mut getopt = Getopt::new(args, "a");
 
         let r1 = getopt.next();
         assert_eq!(
@@ -933,7 +955,7 @@ mod tests {
     #[test]
     fn test_double_dash_ends_options() {
         let args = &["prog", "--", "-a"];
-        let mut getopt = Getopt::new(args, "a", true);
+        let mut getopt = Getopt::new(args, "a");
 
         let result = getopt.next();
         assert_eq!(result, None);
@@ -942,7 +964,8 @@ mod tests {
     #[test]
     fn test_unrecognized_option() {
         let args = &["prog", "-x"];
-        let mut getopt = Getopt::new(args, "ab", false);
+        let mut getopt = Getopt::new(args, "ab");
+        getopt.set_opterr(false);
 
         let result = getopt.next();
         assert_eq!(
@@ -958,7 +981,7 @@ mod tests {
     #[test]
     fn test_remaining() {
         let args = &["prog", "-a", "file1.txt", "file2.txt"];
-        let mut getopt = Getopt::new(args, "a", true);
+        let mut getopt = Getopt::new(args, "a");
 
         // Parse the -a option
         let result = getopt.next();
@@ -985,7 +1008,7 @@ mod tests {
     fn posix_single_dash_alone_terminates_options() {
         // A single "-" by itself is not an option and terminates option processing
         let args = &["prog", "-", "-a"];
-        let mut getopt = Getopt::new(args, "a", true);
+        let mut getopt = Getopt::new(args, "a");
 
         let result = getopt.next();
         assert_eq!(result, None); // "-" stops option processing
@@ -995,7 +1018,7 @@ mod tests {
     fn posix_option_argument_attached() {
         // Option argument can be attached to option: -avalue
         let args = &["prog", "-ofile.txt"];
-        let mut getopt = Getopt::new(args, "o:", true);
+        let mut getopt = Getopt::new(args, "o:");
 
         let result = getopt.next();
         assert_eq!(
@@ -1012,7 +1035,7 @@ mod tests {
     fn posix_option_argument_separate() {
         // Option argument can be separate: -a value
         let args = &["prog", "-o", "file.txt"];
-        let mut getopt = Getopt::new(args, "o:", true);
+        let mut getopt = Getopt::new(args, "o:");
 
         let result = getopt.next();
         assert_eq!(
@@ -1029,7 +1052,7 @@ mod tests {
     fn posix_aggregated_options() {
         // Multiple options can be aggregated: -abc
         let args = &["prog", "-abc"];
-        let mut getopt = Getopt::new(args, "abc", true);
+        let mut getopt = Getopt::new(args, "abc");
 
         assert_eq!(
             getopt.next(),
@@ -1061,7 +1084,7 @@ mod tests {
     fn posix_aggregated_with_argument() {
         // Aggregated options where last takes argument: -abf file
         let args = &["prog", "-abf", "file.txt"];
-        let mut getopt = Getopt::new(args, "abf:", true);
+        let mut getopt = Getopt::new(args, "abf:");
 
         assert_eq!(
             getopt.next(),
@@ -1093,7 +1116,8 @@ mod tests {
     #[test]
     fn posix_unknown_option_returns_question_mark() {
         let args = &["prog", "-x"];
-        let mut getopt = Getopt::new(args, "ab", false);
+        let mut getopt = Getopt::new(args, "ab");
+        getopt.set_opterr(false);
 
         let result = getopt.next();
         assert_eq!(
@@ -1110,7 +1134,8 @@ mod tests {
     fn posix_missing_argument_returns_question_mark() {
         // Missing required argument returns '?' when optstring doesn't start with ':'
         let args = &["prog", "-a"];
-        let mut getopt = Getopt::new(args, "a:", false);
+        let mut getopt = Getopt::new(args, "a:");
+        getopt.set_opterr(false);
 
         let result = getopt.next();
         assert_eq!(
@@ -1127,7 +1152,8 @@ mod tests {
     fn posix_missing_argument_returns_colon() {
         // Missing required argument returns ':' when optstring starts with ':'
         let args = &["prog", "-a"];
-        let mut getopt = Getopt::new(args, ":a:", false);
+        let mut getopt = Getopt::new(args, ":a:");
+        getopt.set_opterr(false);
 
         let result = getopt.next();
         assert_eq!(
@@ -1144,7 +1170,7 @@ mod tests {
     fn posix_double_dash_terminates_options() {
         // Double dash "--" terminates option processing
         let args = &["prog", "-a", "--", "-b"];
-        let mut getopt = Getopt::new(args, "ab", true);
+        let mut getopt = Getopt::new(args, "ab");
 
         assert_eq!(
             getopt.next(),
@@ -1161,7 +1187,7 @@ mod tests {
     fn posix_no_error_on_colon_prefix() {
         // optstring starting with ':' suppresses error messages
         let args = &["prog", "-x"];
-        let mut getopt = Getopt::new(args, ":ab", true);
+        let mut getopt = Getopt::new(args, ":ab");
 
         let result = getopt.next();
         assert_eq!(
@@ -1179,7 +1205,7 @@ mod tests {
     fn posix_option_with_no_argument() {
         // Option that doesn't take argument
         let args = &["prog", "-a", "file.txt"];
-        let mut getopt = Getopt::new(args, "a", true);
+        let mut getopt = Getopt::new(args, "a");
 
         let result = getopt.next();
         assert_eq!(
@@ -1197,7 +1223,7 @@ mod tests {
         // Options and non-options mixed per POSIX guideline 7
         // Example: cmd -a -b file1 file2
         let args = &["prog", "-a", "-b", "file1", "file2"];
-        let mut getopt = Getopt::new(args, "ab", true);
+        let mut getopt = Getopt::new(args, "ab");
 
         assert_eq!(
             getopt.next(),
@@ -1224,7 +1250,7 @@ mod tests {
         // Per spec examples: cmd -ao arg path path
         // (aggregated options where last takes argument)
         let args = &["prog", "-ao", "arg", "path"];
-        let mut getopt = Getopt::new(args, "a:o:", true);
+        let mut getopt = Getopt::new(args, "a:o:");
 
         assert_eq!(
             getopt.next(),
@@ -1242,7 +1268,7 @@ mod tests {
         // Per spec examples: cmd -a -o arg path path
         // -a takes no argument, -o takes one
         let args = &["prog", "-a", "-o", "arg", "path"];
-        let mut getopt = Getopt::new(args, "ao:", true);
+        let mut getopt = Getopt::new(args, "ao:");
 
         assert_eq!(
             getopt.next(),
@@ -1268,7 +1294,7 @@ mod tests {
     fn posix_option_order_independence() {
         // Options in any order: cmd -o arg -a path
         let args = &["prog", "-o", "arg", "-a", "path"];
-        let mut getopt = Getopt::new(args, "a:o:", true);
+        let mut getopt = Getopt::new(args, "a:o:");
 
         let r1 = getopt.next();
         assert_eq!(
@@ -1297,7 +1323,7 @@ mod tests {
     fn posix_attached_argument_in_aggregated() {
         // Per spec: cmd -oarg path path
         let args = &["prog", "-oarg", "path"];
-        let mut getopt = Getopt::new(args, "o:", true);
+        let mut getopt = Getopt::new(args, "o:");
 
         let result = getopt.next();
         assert_eq!(
@@ -1316,7 +1342,7 @@ mod tests {
         // cmd -a -o arg -- path path
         // -a takes no argument, -o takes one
         let args = &["prog", "-a", "-o", "arg", "--", "path", "path"];
-        let mut getopt = Getopt::new(args, "ao:", true);
+        let mut getopt = Getopt::new(args, "ao:");
 
         assert_eq!(
             getopt.next(),
@@ -1342,7 +1368,7 @@ mod tests {
     fn posix_long_option_with_equals() {
         // Long option with --name=value syntax
         let args = &["prog", "--config=app.conf"];
-        let mut getopt = Getopt::new(args, "c:(config)", true);
+        let mut getopt = Getopt::new(args, "c:(config)");
 
         let result = getopt.next();
         assert_eq!(
@@ -1359,7 +1385,7 @@ mod tests {
     fn posix_long_option_separate_argument() {
         // Long option with separate argument
         let args = &["prog", "--config", "app.conf"];
-        let mut getopt = Getopt::new(args, "c:(config)", true);
+        let mut getopt = Getopt::new(args, "c:(config)");
 
         let result = getopt.next();
         assert_eq!(
@@ -1376,7 +1402,7 @@ mod tests {
     fn posix_long_option_no_argument() {
         // Long option without argument
         let args = &["prog", "--help"];
-        let mut getopt = Getopt::new(args, "h(help)", true);
+        let mut getopt = Getopt::new(args, "h(help)");
 
         let result = getopt.next();
         assert_eq!(
@@ -1393,7 +1419,7 @@ mod tests {
     fn posix_mixed_short_and_long_options() {
         // Mix of short and long options
         let args = &["prog", "-v", "--config=app.conf", "-d"];
-        let mut getopt = Getopt::new(args, "vdc:(config)", true);
+        let mut getopt = Getopt::new(args, "vdc:(config)");
 
         assert_eq!(
             getopt.next(),
@@ -1425,7 +1451,7 @@ mod tests {
     fn posix_mixed_short_and_long_options_with_nil_value() {
         // Mix of short and long options
         let args = &["prog", "-v", "--config=", "-d"];
-        let mut getopt = Getopt::new(args, "vdc:(config)", true);
+        let mut getopt = Getopt::new(args, "vdc:(config)");
 
         assert_eq!(
             getopt.next(),
@@ -1457,7 +1483,7 @@ mod tests {
     fn posix_all_options_consumed_returns_none() {
         // When all options parsed, subsequent calls return None
         let args = &["prog", "-a"];
-        let mut getopt = Getopt::new(args, "a", true);
+        let mut getopt = Getopt::new(args, "a");
 
         assert_eq!(
             getopt.next(),
@@ -1475,7 +1501,8 @@ mod tests {
     fn posix_empty_optstring() {
         // No options defined: all arguments are non-options
         let args = &["prog", "-a", "file"];
-        let mut getopt = Getopt::new(args, "", false);
+        let mut getopt = Getopt::new(args, "");
+        getopt.set_opterr(false);
 
         let result = getopt.next();
         // Since no options are defined, -a is not recognized
@@ -1499,7 +1526,7 @@ mod tests {
         // GNU extension: :: means optional argument
         // When argument is attached to option (-avalue), it becomes optarg
         let args = &["prog", "-avalue"];
-        let mut getopt = Getopt::new(args, "a::", true);
+        let mut getopt = Getopt::new(args, "a::");
 
         let result = getopt.next();
         assert_eq!(
@@ -1519,7 +1546,7 @@ mod tests {
         // GNU: With ::, separate arguments are NOT consumed (optional)
         // Our: With ::, we treat it like : and consume the next argument
         let args = &["prog", "-a", "file.txt"];
-        let mut getopt = Getopt::new(args, "a::", true);
+        let mut getopt = Getopt::new(args, "a::");
 
         let result = getopt.next();
         assert_eq!(
@@ -1538,7 +1565,7 @@ mod tests {
         // and the long option syntax needs specific formatting to work correctly
         // Using d: instead of d:: to ensure proper parsing with equals syntax
         let args = &["prog", "--output=result.txt"];
-        let mut getopt = Getopt::new(args, "o:(output):", true);
+        let mut getopt = Getopt::new(args, "o:(output):");
 
         let result = getopt.next();
         // Note: This tests basic long option with = syntax
@@ -1561,7 +1588,7 @@ mod tests {
         // NOTE: Using single : for required arg to ensure compatibility
         // The :: double-colon optional arg semantics are not fully implemented
         let args = &["prog", "--config", "file.txt"];
-        let mut getopt = Getopt::new(args, "c:(config):", true);
+        let mut getopt = Getopt::new(args, "c:(config):");
 
         let result = getopt.next();
         assert_eq!(
@@ -1581,7 +1608,8 @@ mod tests {
         // Current implementation uses parentheses instead: o(output)
         // This test documents the difference
         let args = &["prog", "-W", "output=file.txt"];
-        let mut getopt = Getopt::new(args, "Wo:", false);
+        let mut getopt = Getopt::new(args, "Wo:");
+        getopt.set_opterr(false);
 
         let result = getopt.next();
         // Current impl treats -W as regular option, not as long option prefix
@@ -1602,7 +1630,7 @@ mod tests {
         // GNU extension: '+' at start of optstring stops at first non-option
         // This is similar to POSIX strict mode
         let args = &["prog", "-a", "file.txt", "-b"];
-        let mut getopt = Getopt::new(args, "+ab", true);
+        let mut getopt = Getopt::new(args, "+ab");
 
         assert_eq!(
             getopt.next(),
@@ -1623,7 +1651,8 @@ mod tests {
         // Note: Current implementation returns None for non-options; this would need
         // special handling to return a GetoptResult::Option('1') equivalent
         let args = &["prog", "-a", "file.txt", "-b"];
-        let mut getopt = Getopt::new(args, "-ab", false);
+        let mut getopt = Getopt::new(args, "-ab");
+        getopt.set_opterr(false);
 
         assert_eq!(
             getopt.next(),
@@ -1643,7 +1672,7 @@ mod tests {
         // GNU compatibility: mixing short and long options in one optstring
         // Simplified test without complex long option syntax to avoid parser issues
         let args = &["prog", "-a", "-d", "file.txt", "-b"];
-        let mut getopt = Getopt::new(args, "abd:", true);
+        let mut getopt = Getopt::new(args, "abd:");
 
         assert_eq!(
             getopt.next(),
@@ -1679,7 +1708,8 @@ mod tests {
         // Our implementation uses parentheses syntax, not full long option names
         // but we can test that partial matching would work conceptually
         let args = &["prog", "--hel"];
-        let mut getopt = Getopt::new(args, "h(help)", false);
+        let mut getopt = Getopt::new(args, "h(help)");
+        getopt.set_opterr(false);
 
         let result = getopt.next();
         // Current implementation may treat this as unrecognized since it's not
@@ -1693,7 +1723,8 @@ mod tests {
     fn gnu_error_on_unrecognized_long_option() {
         // GNU getopt_long returns '?' for unknown long options
         let args = &["prog", "--invalid"];
-        let mut getopt = Getopt::new(args, "a(add)", false);
+        let mut getopt = Getopt::new(args, "a(add)");
+        getopt.set_opterr(false);
 
         let result = getopt.next();
         // Unknown long option should be detected
@@ -1704,7 +1735,7 @@ mod tests {
     fn gnu_long_option_with_required_argument() {
         // GNU: long options can require arguments: --name=value or --name value
         let args = &["prog", "--file=myfile.txt"];
-        let mut getopt = Getopt::new(args, "f:(file)", true);
+        let mut getopt = Getopt::new(args, "f:(file)");
 
         let result = getopt.next();
         assert_eq!(
@@ -1721,7 +1752,7 @@ mod tests {
     fn gnu_consecutive_short_options_stress_test() {
         // GNU: stress test with many consecutive short options
         let args = &["prog", "-abcdefg"];
-        let mut getopt = Getopt::new(args, "abcdefg", true);
+        let mut getopt = Getopt::new(args, "abcdefg");
 
         for expected_char in &['a', 'b', 'c', 'd', 'e', 'f', 'g'] {
             let result = getopt.next();
@@ -1741,7 +1772,7 @@ mod tests {
     fn gnu_option_argument_edge_case_equals_zero() {
         // GNU: edge case where argument is "0"
         let args = &["prog", "-v0"];
-        let mut getopt = Getopt::new(args, "v:", true);
+        let mut getopt = Getopt::new(args, "v:");
 
         let result = getopt.next();
         assert_eq!(
@@ -1758,7 +1789,7 @@ mod tests {
     fn gnu_option_argument_equals_dash() {
         // GNU: option argument that is a dash
         let args = &["prog", "-f", "-"];
-        let mut getopt = Getopt::new(args, "f:", true);
+        let mut getopt = Getopt::new(args, "f:");
 
         let result = getopt.next();
         assert_eq!(
@@ -1776,7 +1807,7 @@ mod tests {
     fn prog_name_simple() {
         // Test with simple program name (no path)
         let args = &["myapp", "-a"];
-        let getopt = Getopt::new(args, "a", true);
+        let getopt = Getopt::new(args, "a");
         assert_eq!(getopt.prog_name(), "myapp");
     }
 
@@ -1788,7 +1819,7 @@ mod tests {
         #[cfg(windows)]
         let args = &["C:\\Program Files\\myapp", "-a"];
 
-        let getopt = Getopt::new(args, "a", true);
+        let getopt = Getopt::new(args, "a");
         assert_eq!(getopt.prog_name(), "myapp");
     }
 
@@ -1800,7 +1831,7 @@ mod tests {
         #[cfg(windows)]
         let args = &[".\\bin\\myapp", "-a"];
 
-        let getopt = Getopt::new(args, "a", true);
+        let getopt = Getopt::new(args, "a");
         assert_eq!(getopt.prog_name(), "myapp");
     }
 
@@ -1808,7 +1839,7 @@ mod tests {
     fn prog_name_empty_args() {
         // Test with empty iterator - should result in empty prog_name
         let args: &[&str] = &[];
-        let getopt = Getopt::new(args, "a", true);
+        let getopt = Getopt::new(args, "a");
         assert_eq!(getopt.prog_name(), "");
     }
 
@@ -1816,7 +1847,7 @@ mod tests {
     fn prog_name_empty_string() {
         // Test with empty string as argv[0]
         let args = &["", "-a"];
-        let getopt = Getopt::new(args, "a", true);
+        let getopt = Getopt::new(args, "a");
         assert_eq!(getopt.prog_name(), "");
     }
 
@@ -1824,7 +1855,7 @@ mod tests {
     fn prog_name_persists_through_parsing() {
         // Test that prog_name remains available even after parsing options
         let args = &["testapp", "-a", "-b"];
-        let mut getopt = Getopt::new(args, "ab", true);
+        let mut getopt = Getopt::new(args, "ab");
 
         // Parse options
         let _ = getopt.next(); // -a

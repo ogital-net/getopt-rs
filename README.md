@@ -39,7 +39,8 @@ use getopt::Getopt;
 
 fn main() {
     let args = &["myapp", "-a", "-b", "value", "file1", "file2"];
-    let mut opts = Getopt::new(args, "ab:", false);
+    let mut opts = Getopt::new(args, "ab:");
+    opts.set_opterr(false); // Suppress error messages
 
     while let Some(opt) = opts.next() {
         match opt.val() {
@@ -65,7 +66,7 @@ fn main() {
 use getopt::Getopt;
 
 let args = &["prog", "-a", "-b", "-c"];
-let mut getopt = Getopt::new(args, "abc", false);
+let mut getopt = Getopt::new(args, "abc");
 
 while let Some(opt) = getopt.next() {
     match opt.val() {
@@ -83,7 +84,7 @@ while let Some(opt) = getopt.next() {
 use getopt::Getopt;
 
 let args = &["prog", "-o", "output.txt", "-v"];
-let mut getopt = Getopt::new(args, "o:v", false);
+let mut getopt = Getopt::new(args, "o:v");
 
 let mut output = None;
 let mut verbose = false;
@@ -106,7 +107,7 @@ use getopt::Getopt;
 
 // -abc is equivalent to -a -b -c
 let args = &["prog", "-abc"];
-let mut getopt = Getopt::new(args, "abc", false);
+let mut getopt = Getopt::new(args, "abc");
 
 assert_eq!(getopt.next().map(|o| o.val()), Some('a'));
 assert_eq!(getopt.next().map(|o| o.val()), Some('b'));
@@ -121,8 +122,7 @@ use getopt::Getopt;
 let args = &["prog", "--help", "--output=file.txt", "--verbose"];
 let mut getopt = Getopt::new(
     args,
-    "h(help)o:(output)v(verbose)",
-    true
+    "h(help)o:(output)v(verbose)"
 );
 
 while let Some(opt) = getopt.next() {
@@ -141,7 +141,7 @@ while let Some(opt) = getopt.next() {
 use getopt::Getopt;
 
 fn main() {
-    let mut getopt = Getopt::new(std::env::args_os(), "abc:d", false);
+    let mut getopt = Getopt::new(std::env::args_os(), "abc:d");
     
     while let Some(opt) = getopt.next() {
         match opt.val() {
@@ -179,7 +179,8 @@ use getopt::Getopt;
 
 // Leading ':' in optstring changes error behavior
 let args = &["prog", "-x", "-a"];
-let mut getopt = Getopt::new(args, ":a:", false);
+let mut getopt = Getopt::new(args, ":a:");
+getopt.set_opterr(false); // Suppress error messages
 
 while let Some(opt) = getopt.next() {
     match opt.val() {
@@ -275,7 +276,7 @@ The first argument (argv\[0\]) is consumed and used as the program name:
 use getopt::Getopt;
 
 let args = &["/usr/bin/myapp", "-a"];
-let getopt = Getopt::new(args, "a", false);
+let getopt = Getopt::new(args, "a");
 
 assert_eq!(getopt.prog_name(), "myapp");  // Basename extracted
 ```
