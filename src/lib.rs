@@ -394,14 +394,21 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     /// let getopt = getopt_rs::Getopt::new(args.into_iter(), "a");
     /// assert_eq!(getopt.prog_name(), "myapp");
     ///
+    /// #[cfg(unix)]
     /// let args = vec!["/usr/bin/myapp".to_string(), "-a".to_string()];
+    ///
+    /// #[cfg(windows)]
+    /// let args = vec!["C:\\Program Files\\myapp".to_string(), "-a".to_string()];
+    ///
     /// let getopt = getopt_rs::Getopt::new(args.into_iter(), "a");
     /// assert_eq!(getopt.prog_name(), "myapp");
     /// ```
     pub fn prog_name(&self) -> &str {
         #[cfg(feature = "std")]
         const PATH_SEPARATOR: char = std::path::MAIN_SEPARATOR;
-        #[cfg(not(feature = "std"))]
+        #[cfg(all(not(feature = "std"), windows))]
+        const PATH_SEPARATOR: char = '\\';
+        #[cfg(all(not(feature = "std"), not(windows)))]
         const PATH_SEPARATOR: char = '/';
 
         let s = &self.prog_name;
