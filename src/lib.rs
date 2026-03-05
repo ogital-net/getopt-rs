@@ -158,6 +158,7 @@ impl Opt {
     /// - The actual option character if it was valid
     /// - '?' if an unknown option was encountered
     /// - ':' if a missing argument was detected and optstring starts with ':'
+    #[must_use]
     pub fn val(&self) -> char {
         self.val
     }
@@ -169,6 +170,7 @@ impl Opt {
     ///   - An unknown option was encountered
     ///   - A required argument was missing
     /// - `None` if no error occurred
+    #[must_use]
     pub fn erropt(&self) -> Option<char> {
         self.erropt
     }
@@ -178,6 +180,7 @@ impl Opt {
     /// Returns:
     /// - `Some(&str)` containing the option's argument if one was provided
     /// - `None` if the option takes no argument or if a required argument was missing
+    #[must_use]
     pub fn arg(&self) -> Option<&str> {
         self.arg.as_deref()
     }
@@ -189,6 +192,7 @@ impl Opt {
     /// # Returns
     /// - `Some(String)` containing the option's argument if one was provided
     /// - `None` if the option takes no argument or if a required argument was missing
+    #[must_use]
     pub fn into_arg(self) -> Option<String> {
         self.arg
     }
@@ -449,7 +453,7 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     }
 
     /// Determine if a long option is present in optstring.
-    /// Returns tuple of (index in optstring of short-option char, option_argument) if found.
+    /// Returns tuple of (index in optstring of short-option char, `option_argument`) if found.
     fn parse_long(&self, opt: &'a str) -> Option<(usize, Option<&'a str>)> {
         let mut cp = 0;
         let mut ip = 0;
@@ -532,6 +536,7 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     }
 
     /// Parse command line arguments. Returns the next option found.
+    #[allow(clippy::too_many_lines)]
     fn parse_next(&mut self) -> Option<Opt> {
         // Load next argument if needed
         if self.sp == 1 {
@@ -573,43 +578,38 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
             self.parse_short(optopt).map(|idx| (idx, None))
         };
 
-        let (cp, longoptarg) = match cp_result {
-            Some(result) => result,
-            None => {
-                // Unrecognized option
-                #[cfg_attr(not(feature = "std"), allow(unused_variables))]
-                let opt_display = if is_longopt {
-                    current_arg[2..].to_string()
-                } else {
-                    optopt.to_string()
-                };
-                err!(self, "{}: illegal option -- {}", opt_display);
-                if current_arg.len() > self.sp + 1 && !is_longopt {
-                    self.sp += 1;
-                } else {
-                    self.current_arg = None;
-                    self.sp = 1;
-                }
-                // If getopt() encounters an option character that is not contained in optstring,
-                // it shall return the question-mark ( '?' ) character.
-                // getopt() shall set the variable optopt to the option character that caused the error.
-                return Some(Opt {
-                    val: '?',
-                    erropt: Some(optopt),
-                    arg: None,
-                });
+        let (cp, longoptarg) = if let Some(result) = cp_result {
+            result
+        } else {
+            // Unrecognized option
+            #[cfg_attr(not(feature = "std"), allow(unused_variables))]
+            let opt_display = if is_longopt {
+                current_arg[2..].to_string()
+            } else {
+                optopt.to_string()
+            };
+            err!(self, "{}: illegal option -- {}", opt_display);
+            if current_arg.len() > self.sp + 1 && !is_longopt {
+                self.sp += 1;
+            } else {
+                self.current_arg = None;
+                self.sp = 1;
             }
+            // If getopt() encounters an option character that is not contained in optstring,
+            // it shall return the question-mark ( '?' ) character.
+            // getopt() shall set the variable optopt to the option character that caused the error.
+            return Some(Opt {
+                val: '?',
+                erropt: Some(optopt),
+                arg: None,
+            });
         };
 
         // A valid option has been identified.  If it should have an
         // option-argument, process that now.
         optopt = self.optstring[cp] as char;
 
-        let takes_arg = self
-            .optstring
-            .get(cp + 1)
-            .map(|&b| b == b':')
-            .unwrap_or(false);
+        let takes_arg = self.optstring.get(cp + 1).map_or(false, |&b| b == b':');
 
         let optarg: Option<String>;
 
@@ -621,7 +621,7 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
             } else if is_longopt && longoptarg.is_some() {
                 // The option argument was explicitly set to
                 // the empty string on the command line (--option=)
-                optarg = longoptarg.map(|v| v.to_owned());
+                optarg = longoptarg.map(ToOwned::to_owned);
                 self.current_arg = None;
                 self.sp = 1;
             } else if let Some(next_arg) = self.next_arg() {
@@ -680,7 +680,7 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     }
 }
 
-impl<'a, V: ArgV, I: Iterator<Item = V>> Iterator for Getopt<'a, V, I> {
+impl<V: ArgV, I: Iterator<Item = V>> Iterator for Getopt<'_, V, I> {
     type Item = Opt;
 
     fn next(&mut self) -> Option<Self::Item> {
