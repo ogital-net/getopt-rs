@@ -632,7 +632,7 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
                 err!(self, "{}: option requires an argument -- {}", optopt);
                 self.sp = 1;
                 self.current_arg = None;
-                return if self.optstring.starts_with(b":") {
+                return if !self.optstring.is_empty() && self.optstring[0] == (b':') {
                     Some(Opt {
                         val: ':',
                         erropt: Some(optopt),
