@@ -455,8 +455,20 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     /// Determine if a long option is present in optstring.
     /// Returns tuple of (index in optstring of short-option char, `option_argument`) if found.
     fn parse_long(&self, opt: &'a str) -> Option<(usize, Option<&'a str>)> {
-        let mut cp = 0;
-        let mut ip = 0;
+        // Skip leading special characters
+        let start_pos = if !self.optstring.is_empty() {
+            let c = self.optstring[0];
+            if c == b':' || c == b'+' {
+                1
+            } else {
+                0
+            }
+        } else {
+            return None;
+        };
+
+        let mut cp = start_pos;
+        let mut ip = start_pos;
 
         let opt_eq_pos = opt.find('=');
 
@@ -523,7 +535,7 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
 
             cp = ip;
 
-            while cp > 0 && self.optstring[cp - 1] == b':' {
+            while cp > start_pos && self.optstring[cp - 1] == b':' {
                 cp -= 1;
             }
 
@@ -863,7 +875,7 @@ mod tests {
     #[test]
     fn test_long_option_simple() {
         let args = &["prog", "--help"];
-        let mut getopt = Getopt::new(args, "h(help)");
+        let mut getopt = Getopt::new(args, ":h(help)");
 
         let result = getopt.next();
         assert_eq!(
@@ -927,7 +939,7 @@ mod tests {
     #[test]
     fn test_long_option_without_argument() {
         let args = &["prog", "--verbose=file.txt"];
-        let mut getopt = Getopt::new(args, "v(verbose)");
+        let mut getopt = Getopt::new(args, ":v(verbose)");
 
         let result = getopt.next();
         assert_eq!(
