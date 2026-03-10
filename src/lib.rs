@@ -431,19 +431,15 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
             return None;
         }
 
-        let ascii_char = c as u8;
         let mut i = 0;
 
         while i < self.optstring.len() {
-            if self.optstring[i] == ascii_char {
+            if self.optstring[i] == c as u8 {
                 return Some(i);
             }
             // Skip over parenthesized long options
-            while i < self.optstring.len() && self.optstring[i] == b'(' {
+            while self.optstring[i] == b'(' {
                 while i < self.optstring.len() && self.optstring[i] != b')' {
-                    i += 1;
-                }
-                if i < self.optstring.len() {
                     i += 1;
                 }
             }
@@ -884,6 +880,48 @@ mod tests {
                 val: 'h',
                 erropt: None,
                 arg: None
+            })
+        );
+    }
+
+    #[test]
+    fn test_long_short_mixed() {
+        let args = &["prog", "-V"];
+        let mut getopt = Getopt::new(args, ":h(help)V(version)x:(execute)");
+
+        let result = getopt.next();
+        assert_eq!(
+            result,
+            Some(Opt {
+                val: 'V',
+                erropt: None,
+                arg: None
+            })
+        );
+
+        let args = &["prog", "-x"];
+        let mut getopt = Getopt::new(args, ":h(help)V(version)x:(execute)");
+
+        let result = getopt.next();
+        assert_eq!(
+            result,
+            Some(Opt {
+                val: ':',
+                erropt: Some('x'),
+                arg: None
+            })
+        );
+
+        let args = &["prog", "--execute", "cmd"];
+        let mut getopt = Getopt::new(args, ":h(help)V(version)x:(execute)");
+
+        let result = getopt.next();
+        assert_eq!(
+            result,
+            Some(Opt {
+                val: 'x',
+                erropt: None,
+                arg: Some("cmd".to_string()),
             })
         );
     }
