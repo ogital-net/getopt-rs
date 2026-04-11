@@ -451,91 +451,75 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     /// Determine if a long option is present in optstring.
     /// Returns tuple of (index in optstring of short-option char, `option_argument`) if found.
     fn parse_long(&self, opt: &'a str) -> Option<(usize, Option<&'a str>)> {
-        // Skip leading special characters
-        let start_pos = if !self.optstring.is_empty() {
-            let c = self.optstring[0];
-            if c == b':' || c == b'+' {
-                1
-            } else {
-                0
-            }
-        } else {
-            return None;
-        };
-
-        let mut cp = start_pos;
-        let mut ip = start_pos;
-
-        let opt_eq_pos = opt.find('=');
+        let opt = opt.as_bytes();
+        // index in optstring, beginning of one option spec
+        let mut cp_idx = 0usize;
+        // index in optstring, traverses every char
+        let mut ip_idx = 0usize;
+        // index of opt
+        let mut op_idx: usize;
+        // if opt is matching part of optstring
+        let mut is_match: bool;
 
         loop {
-            if ip < self.optstring.len() && self.optstring[ip] != b'(' {
-                ip += 1;
-            }
-
-            if ip >= self.optstring.len() {
-                break;
-            }
-
-            if ip < self.optstring.len() && self.optstring[ip] == b':' {
-                ip += 1;
-                if ip >= self.optstring.len() {
+            if self.optstring[ip_idx] != b'(' {
+                ip_idx += 1;
+                if ip_idx == self.optstring.len() {
                     break;
                 }
             }
-
-            while ip < self.optstring.len() && self.optstring[ip] == b'(' {
-                ip += 1;
-                if ip >= self.optstring.len() {
+            if self.optstring[ip_idx] == b':' {
+                ip_idx += 1;
+                if ip_idx == self.optstring.len() {
                     break;
                 }
-
-                let opt_name_ascii = match opt_eq_pos {
-                    Some(pos) => &opt.as_bytes()[..pos],
-                    None => opt.as_bytes(),
-                };
-
-                let mut opt_idx = 0;
-
-                while ip < self.optstring.len()
-                    && self.optstring[ip] != b')'
-                    && opt_idx < opt_name_ascii.len()
+            }
+            while self.optstring[ip_idx] == b'(' {
+                ip_idx += 1;
+                if ip_idx == self.optstring.len() {
+                    break;
+                }
+                // if opt is matching part of optstring
+                is_match = true;
+                op_idx = 0;
+                while ip_idx < self.optstring.len()
+                    && op_idx < opt.len()
+                    && self.optstring[ip_idx] != b')'
                 {
-                    if self.optstring[ip] != opt_name_ascii[opt_idx] {
+                    is_match = self.optstring[ip_idx] == opt[op_idx] && is_match;
+                    ip_idx += 1;
+                    op_idx += 1;
+                }
+
+                if is_match
+                    && self.optstring[ip_idx] == b')'
+                    && (op_idx == opt.len() || opt[op_idx] == b'=')
+                {
+                    let longoptarg = if op_idx != opt.len() && opt[op_idx] == b'=' {
+                        // SAFETY: we know this is a valid char boundary
+                        // since we only skipped over leading ascii bytes
+                        Some(unsafe { core::str::from_utf8_unchecked(&opt[op_idx + 1..]) })
+                    } else {
+                        None
+                    };
+                    return Some((cp_idx, longoptarg));
+                }
+                if self.optstring[ip_idx] == b')' {
+                    ip_idx += 1;
+                    if ip_idx == self.optstring.len() {
                         break;
                     }
-                    ip += 1;
-                    opt_idx += 1;
-                }
-
-                if ip < self.optstring.len()
-                    && self.optstring[ip] == b')'
-                    && opt_idx == opt_name_ascii.len()
-                {
-                    let longoptarg = opt_eq_pos.map(|pos| &opt[pos + 1..]);
-                    return Some((cp, longoptarg));
-                }
-
-                while ip < self.optstring.len() && self.optstring[ip] != b')' {
-                    ip += 1;
-                }
-
-                if ip < self.optstring.len() && self.optstring[ip] == b')' {
-                    ip += 1;
-                }
-
-                if ip >= self.optstring.len() {
-                    break;
                 }
             }
-
-            cp = ip;
-
-            while cp > start_pos && self.optstring[cp - 1] == b':' {
-                cp -= 1;
+            cp_idx = ip_idx;
+            // Handle double-colon in optstring ("a::(longa)")
+            // The old getopt() accepts it and treats it as a
+            // required argument.
+            while cp_idx < self.optstring.len() && cp_idx > 0 && self.optstring[cp_idx] == b':' {
+                cp_idx -= 1;
             }
 
-            if ip >= self.optstring.len() {
+            if cp_idx == self.optstring.len() {
                 break;
             }
         }
@@ -930,6 +914,22 @@ mod tests {
     fn test_long_option_with_argument() {
         let args = &["prog", "--output=file.txt"];
         let mut getopt = Getopt::new(args, "o:(output)");
+
+        let result = getopt.next();
+        assert_eq!(
+            result,
+            Some(Opt {
+                val: 'o',
+                erropt: None,
+                arg: Some("file.txt".to_string())
+            })
+        );
+    }
+
+    #[test]
+    fn test_long_option_with_argument_double_colon() {
+        let args = &["prog", "--output=file.txt"];
+        let mut getopt = Getopt::new(args, "o::(output)");
 
         let result = getopt.next();
         assert_eq!(
