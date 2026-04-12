@@ -37,8 +37,7 @@ fuzz_target!(|data: &[u8]| {
         // Create getopt with CStr arguments
         let mut getopt = getopt_rs::Getopt::new(
             args.into_iter(),
-            input.optstring,
-            false,
+            input.optstring
         );
         
         // Consume all options - should never panic

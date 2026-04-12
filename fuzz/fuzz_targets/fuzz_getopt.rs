@@ -22,9 +22,9 @@ fuzz_target!(|data: &[u8]| {
         // Create getopt parser with fuzzed inputs
         let mut getopt = getopt_rs::Getopt::new(
             input.args.iter().copied(),
-            input.optstring,
-            input.opterr,
+            input.optstring
         );
+        getopt.set_opterr(input.opterr);
 
         // Consume all options - this should never panic
         while let Some(opt) = getopt.next() {

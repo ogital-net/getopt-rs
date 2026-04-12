@@ -27,9 +27,9 @@ fuzz_target!(|data: &[u8]| {
             for opterr in [true, false] {
                 let mut getopt = getopt_rs::Getopt::new(
                     args.iter().copied(),
-                    optstring,
-                    opterr,
+                    optstring
                 );
+                getopt.set_opterr(opterr);
 
                 // Consume all options - should never panic
                 while let Some(opt) = getopt.next() {

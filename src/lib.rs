@@ -438,7 +438,7 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
                 return Some(i);
             }
             // Skip over parenthesized long options
-            while self.optstring[i] == b'(' {
+            while i < self.optstring.len() && self.optstring[i] == b'(' {
                 while i < self.optstring.len() && self.optstring[i] != b')' {
                     i += 1;
                 }
@@ -451,6 +451,9 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     /// Determine if a long option is present in optstring.
     /// Returns tuple of (index in optstring of short-option char, `option_argument`) if found.
     fn parse_long(&self, opt: &'a str) -> Option<(usize, Option<&'a str>)> {
+        if self.optstring.is_empty() {
+            return None;
+        }
         let opt = opt.as_bytes();
         // index in optstring, beginning of one option spec
         let mut cp_idx = 0usize;
@@ -491,6 +494,9 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
                     op_idx += 1;
                 }
 
+                if ip_idx >= self.optstring.len() {
+                    break;
+                }
                 if is_match
                     && self.optstring[ip_idx] == b')'
                     && (op_idx == opt.len() || opt[op_idx] == b'=')
@@ -1923,6 +1929,50 @@ mod tests {
 
         let _ = getopt.next(); // None
         assert_eq!(getopt.prog_name(), "testapp");
+    }
+
+    // Regression tests for fuzzer-discovered panics
+
+    #[test]
+    fn fuzz_regression_empty_optstring_longopt() {
+        // parse_long was called with empty optstring, causing OOB index on optstring[0]
+        let args = vec!["prog", "--help"];
+        let mut getopt = Getopt::new(args.iter().copied(), "");
+        while let Some(opt) = getopt.next() {
+            let _ = opt.val();
+        }
+    }
+
+    #[test]
+    fn fuzz_regression_empty_optstring_any_arg() {
+        // Any argument through an empty optstring must not panic
+        for arg in &["-a", "-", "--", "--xyz", "--x=y"] {
+            let args = vec!["prog", arg];
+            let mut getopt = Getopt::new(args.iter().copied(), "");
+            while let Some(opt) = getopt.next() {
+                let _ = opt.val();
+            }
+        }
+    }
+
+    #[test]
+    fn fuzz_regression_parse_short_unclosed_paren() {
+        // parse_short indexed past end of optstring when a '(' had no closing ')'
+        let args = vec!["prog", "-x"];
+        let mut getopt = Getopt::new(args.iter().copied(), "a(unclosed");
+        while let Some(opt) = getopt.next() {
+            let _ = opt.val();
+        }
+    }
+
+    #[test]
+    fn fuzz_regression_parse_long_unclosed_paren() {
+        // parse_long indexed past end of optstring when a '(' had no closing ')'
+        let args = vec!["prog", "--help"];
+        let mut getopt = Getopt::new(args.iter().copied(), "a(unclosed");
+        while let Some(opt) = getopt.next() {
+            let _ = opt.val();
+        }
     }
 
     // GNU getopt_long Compatibility Notes

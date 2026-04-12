@@ -1,0 +1,36 @@
+[package]
+name = "getopt-rs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+[dependencies.getopt-rs]
+path = ".."
+
+[[bin]]
+name = "fuzz_cstr"
+path = "fuzz_targets/fuzz_cstr.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_getopt"
+path = "fuzz_targets/fuzz_getopt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_optstring"
+path = "fuzz_targets/fuzz_optstring.rs"
+test = false
+doc = false
+bench = false
