@@ -1949,9 +1949,9 @@ mod tests {
     #[test]
     fn fuzz_regression_empty_optstring_longopt() {
         // parse_long was called with empty optstring, causing OOB index on optstring[0]
-        let args = vec!["prog", "--help"];
-        let mut getopt = Getopt::new(args.iter().copied(), "");
-        while let Some(opt) = getopt.next() {
+        let args = ["prog", "--help"];
+        let getopt = Getopt::new(args.iter().copied(), "");
+        for opt in getopt {
             let _ = opt.val();
         }
     }
@@ -1960,9 +1960,9 @@ mod tests {
     fn fuzz_regression_empty_optstring_any_arg() {
         // Any argument through an empty optstring must not panic
         for arg in &["-a", "-", "--", "--xyz", "--x=y"] {
-            let args = vec!["prog", arg];
-            let mut getopt = Getopt::new(args.iter().copied(), "");
-            while let Some(opt) = getopt.next() {
+            let args = ["prog", arg];
+            let getopt = Getopt::new(args.iter().copied(), "");
+            for opt in getopt {
                 let _ = opt.val();
             }
         }
@@ -1971,9 +1971,9 @@ mod tests {
     #[test]
     fn fuzz_regression_parse_short_unclosed_paren() {
         // parse_short indexed past end of optstring when a '(' had no closing ')'
-        let args = vec!["prog", "-x"];
-        let mut getopt = Getopt::new(args.iter().copied(), "a(unclosed");
-        while let Some(opt) = getopt.next() {
+        let args = ["prog", "-x"];
+        let getopt = Getopt::new(args.iter().copied(), "a(unclosed");
+        for opt in getopt {
             let _ = opt.val();
         }
     }
@@ -1981,9 +1981,9 @@ mod tests {
     #[test]
     fn fuzz_regression_parse_long_unclosed_paren() {
         // parse_long indexed past end of optstring when a '(' had no closing ')'
-        let args = vec!["prog", "--help"];
-        let mut getopt = Getopt::new(args.iter().copied(), "a(unclosed");
-        while let Some(opt) = getopt.next() {
+        let args = ["prog", "--help"];
+        let getopt = Getopt::new(args.iter().copied(), "a(unclosed");
+        for opt in getopt {
             let _ = opt.val();
         }
     }
