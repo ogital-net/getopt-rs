@@ -35,7 +35,7 @@
 //! For bare-metal or embedded environments where you receive C-style `argc` and `argv`
 //! parameters, you can wrap them in an iterator that yields `&core::ffi::CStr`:
 //!
-//! ```no_run
+//! ```
 //! #![no_std]
 //! #![no_main]
 //!
@@ -127,14 +127,14 @@
 #[allow(unused_imports)]
 #[macro_use]
 extern crate alloc;
-use alloc::borrow::ToOwned;
+use alloc::borrow::{Cow, ToOwned};
 use alloc::string::{String, ToString};
 
 #[cfg(feature = "std")]
 extern crate std;
 
 #[cfg(feature = "std")]
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 
 /// Represents the result of parsing a single command-line option.
 ///
@@ -148,7 +148,7 @@ pub struct Opt {
     /// The option character that caused an error, if any
     pub erropt: Option<char>,
     /// The argument associated with this option, if any
-    pub arg: Option<String>,
+    pub arg: Option<Cow<'static, str>>,
 }
 
 impl Opt {
@@ -193,7 +193,7 @@ impl Opt {
     /// - `Some(String)` containing the option's argument if one was provided
     /// - `None` if the option takes no argument or if a required argument was missing
     #[must_use]
-    pub fn into_arg(self) -> Option<String> {
+    pub fn into_arg(self) -> Option<Cow<'static, str>> {
         self.arg
     }
 }
@@ -213,6 +213,8 @@ mod sealed {
     impl Sealed for &core::ffi::CStr {}
     #[cfg(feature = "std")]
     impl Sealed for std::ffi::OsString {}
+    #[cfg(feature = "std")]
+    impl Sealed for &std::ffi::OsStr {}
 }
 
 /// Trait for types that can be converted into strings for use as command-line arguments.
@@ -229,40 +231,47 @@ pub trait ArgV: sealed::Sealed {
     /// Converts self into a `String`.
     ///
     /// For `OsString`, invalid UTF-8 sequences are replaced with the replacement character.
-    fn into_string(self) -> String;
+    fn into_argv(self) -> Cow<'static, str>;
 }
 
-impl ArgV for &str {
-    fn into_string(self) -> String {
+impl ArgV for &'static str {
+    fn into_argv(self) -> Cow<'static, str> {
         self.into()
     }
 }
 
-impl ArgV for &&str {
-    fn into_string(self) -> String {
+impl ArgV for &&'static str {
+    fn into_argv(self) -> Cow<'static, str> {
         (*self).into()
     }
 }
 
 impl ArgV for String {
-    fn into_string(self) -> String {
-        self
+    fn into_argv(self) -> Cow<'static, str> {
+        self.into()
     }
 }
 
 #[cfg(feature = "std")]
 impl ArgV for OsString {
-    fn into_string(self) -> String {
+    fn into_argv(self) -> Cow<'static, str> {
         match self.into_string() {
-            Ok(s) => s,
-            Err(s) => s.to_string_lossy().into_owned(),
+            Ok(s) => s.into(),
+            Err(s) => s.to_string_lossy().to_string().into(),
         }
     }
 }
 
-impl ArgV for &core::ffi::CStr {
-    fn into_string(self) -> String {
-        self.to_string_lossy().into_owned()
+#[cfg(feature = "std")]
+impl ArgV for &'static OsStr {
+    fn into_argv(self) -> Cow<'static, str> {
+        self.to_string_lossy()
+    }
+}
+
+impl ArgV for &'static core::ffi::CStr {
+    fn into_argv(self) -> Cow<'static, str> {
+        self.to_string_lossy()
     }
 }
 
@@ -272,10 +281,10 @@ pub struct Getopt<'a, V, I: Iterator<Item = V>> {
     iter: I,
 
     /// Current argument being processed
-    current_arg: Option<String>,
+    current_arg: Option<Cow<'static, str>>,
 
     /// argv\[0\]
-    prog_name: String,
+    prog_name: Cow<'static, str>,
 
     /// Current position within the current argument
     sp: usize,
@@ -326,7 +335,7 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     pub fn new<A: IntoIterator<Item = V, IntoIter = I>>(args: A, optstring: &'a str) -> Self {
         let mut iter = args.into_iter();
         // program name (first argument)
-        let prog_name = iter.next().map(ArgV::into_string).unwrap_or_default();
+        let prog_name = iter.next().map(ArgV::into_argv).unwrap_or_default();
 
         Getopt {
             iter,
@@ -394,15 +403,15 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
     /// # Examples
     ///
     /// ```
-    /// let args = vec!["myapp".to_string(), "-a".to_string()];
+    /// let args = vec!["myapp", "-a"];
     /// let getopt = getopt_rs::Getopt::new(args.into_iter(), "a");
     /// assert_eq!(getopt.prog_name(), "myapp");
     ///
     /// #[cfg(unix)]
-    /// let args = vec!["/usr/bin/myapp".to_string(), "-a".to_string()];
+    /// let args = vec!["/usr/bin/myapp", "-a"];
     ///
     /// #[cfg(windows)]
-    /// let args = vec!["C:\\Program Files\\myapp".to_string(), "-a".to_string()];
+    /// let args = vec!["C:\\Program Files\\myapp", "-a"];
     ///
     /// let getopt = getopt_rs::Getopt::new(args.into_iter(), "a");
     /// assert_eq!(getopt.prog_name(), "myapp");
@@ -539,7 +548,7 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
         // Load next argument if needed
         if self.sp == 1 {
             if let Some(arg) = self.next_arg() {
-                self.current_arg = Some(arg.into_string());
+                self.current_arg = Some(arg.into_argv());
             } else {
                 return None;
             }
@@ -609,21 +618,21 @@ impl<'a, V: ArgV, I: Iterator<Item = V>> Getopt<'a, V, I> {
 
         let takes_arg = self.optstring.get(cp + 1).map_or(false, |&b| b == b':');
 
-        let optarg: Option<String>;
+        let optarg: Option<Cow<'static, str>>;
 
         if takes_arg {
             if !is_longopt && current_arg.len() > self.sp + 1 {
-                optarg = Some(current_arg[self.sp + 1..].to_owned());
+                optarg = Some(current_arg[self.sp + 1..].to_owned().into());
                 self.current_arg = None;
                 self.sp = 1;
             } else if is_longopt && longoptarg.is_some() {
                 // The option argument was explicitly set to
                 // the empty string on the command line (--option=)
-                optarg = longoptarg.map(ToOwned::to_owned);
+                optarg = longoptarg.map(|v| v.to_owned().into());
                 self.current_arg = None;
                 self.sp = 1;
             } else if let Some(next_arg) = self.next_arg() {
-                optarg = Some(next_arg.into_string());
+                optarg = Some(next_arg.into_argv());
                 self.current_arg = None;
                 self.sp = 1;
             } else {
@@ -695,8 +704,8 @@ mod tests {
         use core::ffi::CStr;
 
         // Helper function to ensure we're calling the ArgV trait method
-        fn convert<T: ArgV>(arg: T) -> String {
-            arg.into_string()
+        fn convert<T: ArgV>(arg: T) -> Cow<'static, str> {
+            arg.into_argv()
         }
 
         // Test &str conversion
@@ -727,7 +736,7 @@ mod tests {
         // Test OsString conversion (std feature only)
         #[cfg(feature = "std")]
         {
-            use std::ffi::OsString;
+            use std::ffi::{OsStr, OsString};
 
             // Valid UTF-8 OsString
             let os = OsString::from("valid");
@@ -745,6 +754,10 @@ mod tests {
             // Test that OsString with valid UTF-8 works as expected
             let os = OsString::from("test123");
             assert_eq!(convert(os), "test123");
+
+            // Test &'static OsStr conversion
+            let os: &'static OsStr = OsStr::new("static_osstr");
+            assert_eq!(convert(os), "static_osstr");
         }
     }
 
@@ -837,7 +850,7 @@ mod tests {
             Some(Opt {
                 val: 'a',
                 erropt: None,
-                arg: Some("value".to_string())
+                arg: Some("value".into())
             })
         );
     }
@@ -853,7 +866,7 @@ mod tests {
             Some(Opt {
                 val: 'a',
                 erropt: None,
-                arg: Some("value".to_string())
+                arg: Some("value".into())
             })
         );
     }
@@ -911,7 +924,7 @@ mod tests {
             Some(Opt {
                 val: 'x',
                 erropt: None,
-                arg: Some("cmd".to_string()),
+                arg: Some("cmd".into()),
             })
         );
     }
@@ -927,7 +940,7 @@ mod tests {
             Some(Opt {
                 val: 'o',
                 erropt: None,
-                arg: Some("file.txt".to_string())
+                arg: Some("file.txt".into())
             })
         );
     }
@@ -943,7 +956,7 @@ mod tests {
             Some(Opt {
                 val: 'o',
                 erropt: None,
-                arg: Some("file.txt".to_string())
+                arg: Some("file.txt".into())
             })
         );
     }
@@ -959,7 +972,7 @@ mod tests {
             Some(Opt {
                 val: 'o',
                 erropt: None,
-                arg: Some("file.txt".to_string())
+                arg: Some("file.txt".into())
             })
         );
         assert!(getopt.next().is_none());
@@ -974,7 +987,7 @@ mod tests {
             Some(Opt {
                 val: 'o',
                 erropt: None,
-                arg: Some("file.txt".to_string())
+                arg: Some("file.txt".into())
             })
         );
         assert!(getopt.next().is_none());
@@ -1089,7 +1102,7 @@ mod tests {
             Some(Opt {
                 val: 'o',
                 erropt: None,
-                arg: Some("file.txt".to_string())
+                arg: Some("file.txt".into())
             })
         );
     }
@@ -1106,7 +1119,7 @@ mod tests {
             Some(Opt {
                 val: 'o',
                 erropt: None,
-                arg: Some("file.txt".to_string())
+                arg: Some("file.txt".into())
             })
         );
     }
@@ -1171,7 +1184,7 @@ mod tests {
             Some(Opt {
                 val: 'f',
                 erropt: None,
-                arg: Some("file.txt".to_string())
+                arg: Some("file.txt".into())
             })
         );
     }
@@ -1320,7 +1333,7 @@ mod tests {
             Some(Opt {
                 val: 'a',
                 erropt: None,
-                arg: Some("o".to_string())
+                arg: Some("o".into())
             })
         );
         assert_eq!(getopt.next(), None); // Rest are non-options
@@ -1346,7 +1359,7 @@ mod tests {
             Some(Opt {
                 val: 'o',
                 erropt: None,
-                arg: Some("arg".to_string())
+                arg: Some("arg".into())
             })
         );
         // Next call would see "path", which is not an option
@@ -1365,7 +1378,7 @@ mod tests {
             Some(Opt {
                 val: 'o',
                 erropt: None,
-                arg: Some("arg".to_string())
+                arg: Some("arg".into())
             })
         );
 
@@ -1375,7 +1388,7 @@ mod tests {
             Some(Opt {
                 val: 'a',
                 erropt: None,
-                arg: Some("path".to_string())
+                arg: Some("path".into())
             })
         );
 
@@ -1394,7 +1407,7 @@ mod tests {
             Some(Opt {
                 val: 'o',
                 erropt: None,
-                arg: Some("arg".to_string())
+                arg: Some("arg".into())
             })
         );
         assert_eq!(getopt.next(), None);
@@ -1420,7 +1433,7 @@ mod tests {
             Some(Opt {
                 val: 'o',
                 erropt: None,
-                arg: Some("arg".to_string())
+                arg: Some("arg".into())
             })
         );
         // Next seen argument is "--", which terminates option processing
@@ -1439,7 +1452,7 @@ mod tests {
             Some(Opt {
                 val: 'c',
                 erropt: None,
-                arg: Some("app.conf".to_string())
+                arg: Some("app.conf".into())
             })
         );
     }
@@ -1456,7 +1469,7 @@ mod tests {
             Some(Opt {
                 val: 'c',
                 erropt: None,
-                arg: Some("app.conf".to_string())
+                arg: Some("app.conf".into())
             })
         );
     }
@@ -1497,7 +1510,7 @@ mod tests {
             Some(Opt {
                 val: 'c',
                 erropt: None,
-                arg: Some("app.conf".to_string())
+                arg: Some("app.conf".into())
             })
         );
         assert_eq!(
@@ -1529,7 +1542,7 @@ mod tests {
             Some(Opt {
                 val: 'c',
                 erropt: None,
-                arg: Some("".to_string())
+                arg: Some("".into())
             })
         );
         assert_eq!(
@@ -1597,7 +1610,7 @@ mod tests {
             Some(Opt {
                 val: 'a',
                 erropt: None,
-                arg: Some("value".to_string())
+                arg: Some("value".into())
             })
         );
     }
@@ -1617,7 +1630,7 @@ mod tests {
             Some(Opt {
                 val: 'a',
                 erropt: None,
-                arg: Some("file.txt".to_string())
+                arg: Some("file.txt".into())
             })
         );
     }
@@ -1639,7 +1652,7 @@ mod tests {
             Some(Opt {
                 val: 'o',
                 erropt: None,
-                arg: Some("result.txt".to_string())
+                arg: Some("result.txt".into())
             })
         );
     }
@@ -1659,7 +1672,7 @@ mod tests {
             Some(Opt {
                 val: 'c',
                 erropt: None,
-                arg: Some("file.txt".to_string())
+                arg: Some("file.txt".into())
             })
         );
     }
@@ -1751,7 +1764,7 @@ mod tests {
             Some(Opt {
                 val: 'd',
                 erropt: None,
-                arg: Some("file.txt".to_string())
+                arg: Some("file.txt".into())
             })
         );
 
@@ -1806,7 +1819,7 @@ mod tests {
             Some(Opt {
                 val: 'f',
                 erropt: None,
-                arg: Some("myfile.txt".to_string())
+                arg: Some("myfile.txt".into())
             })
         );
     }
@@ -1843,7 +1856,7 @@ mod tests {
             Some(Opt {
                 val: 'v',
                 erropt: None,
-                arg: Some("0".to_string())
+                arg: Some("0".into())
             })
         );
     }
@@ -1860,7 +1873,7 @@ mod tests {
             Some(Opt {
                 val: 'f',
                 erropt: None,
-                arg: Some("-".to_string())
+                arg: Some("-".into())
             })
         );
         // The dash becomes the argument (since standalone dash is special)
